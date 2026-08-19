@@ -41,6 +41,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
+    QSystemTrayIcon,
     QVBoxLayout,
     QWidget,
 )
@@ -596,6 +597,7 @@ class MainWindow(QMainWindow):
 
         self.tasks: dict[Task, QListWidgetItem] = {}
         self.output_windows: dict[Task, OutputWindow] = {}
+        self._force_quit = False
 
         # ---- quick-run buttons (from commands.json) ----
         self._quick_bar = QWidget(self)
@@ -641,6 +643,27 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central)
         self.statusBar().showMessage("Ready")
         self._build_quick_buttons()
+
+        # ---- system tray icon ----
+        self.tray_icon = QSystemTrayIcon(self)
+        # Load icon from file if exists, otherwise use window icon
+        icon_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'icon.png')
+        if os.path.exists(icon_path):
+            from PySide6.QtGui import QIcon
+            self.tray_icon.setIcon(QIcon(icon_path))
+            self.setWindowIcon(QIcon(icon_path))
+        else:
+            self.tray_icon.setIcon(self.windowIcon())
+        self.tray_icon.setToolTip("BG Runner — background task manager")
+        self.tray_icon.activated.connect(self._tray_activated)
+        
+        # Tray icon context menu
+        tray_menu = QMenu()
+        tray_menu.addAction("Show", self._restore_from_tray)
+        tray_menu.addSeparator()
+        tray_menu.addAction("Quit", self._quit_from_tray)
+        self.tray_icon.setContextMenu(tray_menu)
+        self.tray_icon.show()
 
     # ---- quick-run buttons ----------------------------------------
 
@@ -825,6 +848,53 @@ class MainWindow(QMainWindow):
     # ---- shutdown ---------------------------------------------------
 
     def closeEvent(self, event) -> None:
+        """Minimize to tray instead of quitting."""
+        # If user explicitly quit from tray menu, allow quit
+        if getattr(self, '_force_quit', False):
+            running = [t for t in self.tasks if t.state == Task.RUNNING]
+            if running:
+                answer = QMessageBox.question(
+                    self,
+                    "BG Runner",
+                    f"Terminate {len(running)} running task(s) before quitting?",
+                    QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel,
+                )
+                if answer == QMessageBox.Cancel:
+                    event.ignore()
+                    return
+                if answer == QMessageBox.Yes:
+                    for task in running:
+                        task.stop()
+                # No: let tasks keep running, just quit the GUI
+            for win in list(self.output_windows.values()):
+                win.close()
+            event.accept()
+        else:
+            # Minimize to tray
+            event.ignore()
+            self.hide()
+            self.tray_icon.showMessage(
+                "BG Runner",
+                "Application minimized to tray",
+                QSystemTrayIcon.Information,
+                1000
+            )
+
+    def _tray_activated(self, reason: int) -> None:
+        """Handle tray icon clicks."""
+        if reason == QSystemTrayIcon.DoubleClick:
+            self._restore_from_tray()
+        elif reason == QSystemTrayIcon.Trigger:
+            self._restore_from_tray()
+
+    def _restore_from_tray(self) -> None:
+        """Restore window from tray."""
+        self.show()
+        self.raise_()
+        self.activateWindow()
+
+    def _quit_from_tray(self) -> None:
+        """Quit application from tray menu."""
         running = [t for t in self.tasks if t.state == Task.RUNNING]
         if running:
             answer = QMessageBox.question(
@@ -834,14 +904,15 @@ class MainWindow(QMainWindow):
                 QMessageBox.Yes | QMessageBox.No | QMessageBox.Cancel,
             )
             if answer == QMessageBox.Cancel:
-                event.ignore()
                 return
             if answer == QMessageBox.Yes:
                 for task in running:
                     task.stop()
+        # Close output windows
         for win in list(self.output_windows.values()):
             win.close()
-        event.accept()
+        # Quit application
+        QApplication.quit()
 
 
 def main() -> None:
