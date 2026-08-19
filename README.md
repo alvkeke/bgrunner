@@ -4,6 +4,7 @@
 
 ## 功能
 
+- **快速运行按钮**：从同目录的 `commands.json` 读取配置的命令，一键启动（可自定义）
 - **命令输入框**：输入任意命令（如 `ssh -N -L 8080:localhost:8080 user@host`），回车或点 Run 后台运行
 - **拖放运行**：把 `.py` / `.sh` / 可执行文件直接拖进窗口即可运行；其他文件会填入命令框
 - **任务列表**：实时显示每个任务的运行状态、PID、退出码，颜色区分（绿=运行中、灰=成功、红=失败、橙=被终止）
@@ -24,12 +25,30 @@ python3 bg_runner.py
 | 操作 | 效果 |
 | --- | --- |
 | 输入命令后回车 / 点 Run | 后台启动任务 |
+| 点击顶部快速按钮 | 运行 `commands.json` 中配置的命令 |
 | 拖入 `.py` / `.sh` / 可执行文件 | 自动以 `python3` / `bash` / 直接执行的方式运行 |
 | 双击任务行 | 打开该任务的实时输出窗口 |
 | 选中任务后点 Stop selected | 终止选中任务（整棵进程树） |
 | 右键任务 → Restart | 重新运行相同命令（如重连断掉的 SSH 隧道） |
 | 右键任务 → Remove / Clear finished | 清理已完成任务 |
 | 退出程序 | 询问是否终止所有运行中的任务 |
+
+## 快速命令配置
+
+程序同目录下的 `commands.json`（首次运行自动生成示例，`"label"` 省略时用命令本身作为按钮文字）：
+
+```json
+{
+  "buttons": [
+    {"label": "SSH Tunnel", "command": "ssh -N -L 8080:localhost:8080 user@host"},
+    {"label": "Ping", "command": "ping -c 5 8.8.8.8"},
+    {"label": "HTTP Server", "command": "python3 -m http.server 8000"},
+    {"label": "Watch Log", "command": "tail -f /var/log/syslog"}
+  ]
+}
+```
+
+修改文件后在按钮区域**右键 → Reload commands.json** 即可生效（无需重启程序）。
 
 ## 命令解析规则
 

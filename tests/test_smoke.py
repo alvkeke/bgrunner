@@ -160,4 +160,37 @@ w3.close()
 win.clear_finished()
 assert len(win.tasks) == 0
 
+# ================= quick-run command config =================
+
+import json as json_mod
+import tempfile
+
+with tempfile.TemporaryDirectory() as td:
+    cfg = os.path.join(td, "commands.json")
+    # missing file -> creates a sample with the 4 defaults
+    btns, warn = bg_runner.load_quick_commands(cfg)
+    assert os.path.exists(cfg), "sample config not created"
+    assert len(btns) == 4 and warn
+    # custom labels + commands; missing label falls back to the command
+    with open(cfg, "w", encoding="utf-8") as f:
+        json_mod.dump({"buttons": [{"label": "T", "command": "true"}, {"command": "ls -la"}]}, f)
+    btns, warn = bg_runner.load_quick_commands(cfg)
+    assert btns == [("T", "true"), ("ls -la", "ls -la")] and warn is None, btns
+    # broken json -> defaults + warning
+    with open(cfg, "w", encoding="utf-8") as f:
+        f.write("{not valid json")
+    btns, warn = bg_runner.load_quick_commands(cfg)
+    assert len(btns) == 4 and warn, (btns, warn)
+    # empty / wrong shape -> no buttons, no crash
+    with open(cfg, "w", encoding="utf-8") as f:
+        json_mod.dump({"nope": 1}, f)
+    btns, warn = bg_runner.load_quick_commands(cfg)
+    assert btns == [] and warn is None
+print("[ok] quick-command config load (sample/custom/broken/empty)")
+
+# quick buttons actually built on the main window (uses the real config path)
+win._build_quick_buttons()
+assert win._quick_row.count() >= 1
+print("[ok] quick-run buttons built on main window")
+
 print("\nALL SMOKE TESTS PASSED")

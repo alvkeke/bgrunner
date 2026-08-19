@@ -12,6 +12,7 @@ Features:
 from __future__ import annotations
 
 import io
+import json
 import os
 import shlex
 import shutil
@@ -104,6 +105,47 @@ def runnable_command(path: str) -> str | None:
     if os.access(path, os.X_OK):
         return shlex.quote(path)
     return None
+
+
+# ---------------------------------------------------------------- quick commands
+
+DEFAULT_QUICK_COMMANDS: list[dict] = [
+    {"label": "SSH Tunnel", "command": "ssh -N -L 8080:localhost:8080 user@host"},
+    {"label": "Ping", "command": "ping -c 5 8.8.8.8"},
+    {"label": "HTTP Server", "command": "python3 -m http.server 8000"},
+    {"label": "Watch Log", "command": "tail -f /var/log/syslog"},
+]
+
+# config file lives next to the program, so it is found no matter the cwd
+CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "commands.json")
+
+
+def load_quick_commands(path: str = CONFIG_FILE) -> tuple[list[tuple[str, str]], str | None]:
+    """Load (label, command) pairs from a JSON config file.
+
+    A sample commands.json is created next to the program on first run.
+    Returns (buttons, warning); warning is set when the file could not be
+    read or parsed (defaults are used in that case).
+    """
+    defaults = [(c["label"], c["command"]) for c in DEFAULT_QUICK_COMMANDS]
+    if not os.path.exists(path):
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump({"buttons": DEFAULT_QUICK_COMMANDS}, f, ensure_ascii=False, indent=2)
+            return defaults, f"Created sample config: {path}"
+        except OSError as e:
+            return defaults, f"Cannot write {path}: {e}"
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, ValueError) as e:
+        return defaults, f"Cannot read {path}: {e}"
+    buttons = data.get("buttons", []) if isinstance(data, dict) else []
+    result: list[tuple[str, str]] = []
+    for b in buttons:
+        if isinstance(b, dict) and b.get("command"):
+            result.append((b.get("label") or b["command"], b["command"]))
+    return result, None
 
 
 # ---------------------------------------------------------------- ANSI
@@ -555,6 +597,14 @@ class MainWindow(QMainWindow):
         self.tasks: dict[Task, QListWidgetItem] = {}
         self.output_windows: dict[Task, OutputWindow] = {}
 
+        # ---- quick-run buttons (from commands.json) ----
+        self._quick_bar = QWidget(self)
+        self._quick_row = QHBoxLayout(self._quick_bar)
+        self._quick_row.setContentsMargins(0, 0, 0, 0)
+        self._quick_row.setSpacing(6)
+        self._quick_bar.setContextMenuPolicy(Qt.CustomContextMenu)
+        self._quick_bar.customContextMenuRequested.connect(self._quick_menu)
+
         # ---- command bar ----
         self.cmd_edit = HistoryLineEdit(self)
         self.cmd_edit.setPlaceholderText(
@@ -582,6 +632,7 @@ class MainWindow(QMainWindow):
 
         layout = QVBoxLayout()
         layout.setContentsMargins(8, 8, 8, 8)
+        layout.addWidget(self._quick_bar)
         layout.addLayout(bar)
         layout.addWidget(self.list, 1)
 
@@ -589,6 +640,31 @@ class MainWindow(QMainWindow):
         central.setLayout(layout)
         self.setCentralWidget(central)
         self.statusBar().showMessage("Ready")
+        self._build_quick_buttons()
+
+    # ---- quick-run buttons ----------------------------------------
+
+    def _build_quick_buttons(self) -> None:
+        """(Re)build the quick-run buttons from the config file."""
+        while self._quick_row.count():
+            item = self._quick_row.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+        buttons, warning = load_quick_commands()
+        for label, cmd in buttons:
+            btn = QPushButton(label)
+            btn.setToolTip(cmd)
+            btn.clicked.connect(lambda _=False, c=cmd: self.add_task(c))
+            self._quick_row.addWidget(btn)
+        self._quick_row.addStretch(1)
+        if warning:
+            self.statusBar().showMessage(warning, 8000)
+
+    def _quick_menu(self, pos) -> None:
+        menu = QMenu(self)
+        menu.addAction("Reload commands.json", self._build_quick_buttons)
+        menu.exec(self._quick_bar.mapToGlobal(pos))
 
     # ---- task management -----------------------------------------
 

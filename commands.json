@@ -1,0 +1,9 @@
+{
+  "buttons": [
+    {
+      "label": "SSH Tunnel",
+      "command": "ssh -N -L 8080:localhost:8080 user@host"
+    }
+  ]
+}
+
