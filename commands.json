@@ -1,9 +1,12 @@
 {
   "buttons": [
     {
-      "label": "SSH Tunnel",
-      "command": "ssh -N -L 8080:localhost:8080 user@host"
+      "label": "Hermes Web",
+      "command": "/home/alvis/.local/opt/user_shells/tunnel_hermes"
+    },
+    {
+      "label": "whileloop",
+      "command": "while true; do date; sleep 1; done"
     }
   ]
 }
-

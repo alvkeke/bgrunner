@@ -193,4 +193,54 @@ win._build_quick_buttons()
 assert win._quick_row.count() >= 1
 print("[ok] quick-run buttons built on main window")
 
+# ================= save-as-quick (new feature) =================
+
+# --- appending to config: label fallback + duplicate rejection ---
+with tempfile.TemporaryDirectory() as td:
+    cfg = os.path.join(td, "commands.json")
+    with open(cfg, "w", encoding="utf-8") as f:
+        json_mod.dump({"buttons": [{"label": "Old", "command": "true"}]}, f)
+    # empty label -> command itself is used as the label
+    assert win._append_quick_command("", "echo save-test", cfg) is None
+    btns, warn = bg_runner.load_quick_commands(cfg)
+    assert warn is None and btns == [("Old", "true"), ("echo save-test", "echo save-test")], btns
+    # same command again -> error, nothing appended
+    err = win._append_quick_command("Dup", "true", cfg)
+    assert err is not None and "already" in err, err
+    assert len(bg_runner.load_quick_commands(cfg)[0]) == 2
+    # broken config -> error message, no crash
+    with open(cfg, "w", encoding="utf-8") as f:
+        f.write("{broken")
+    assert win._append_quick_command("X", "true", cfg) is not None
+print("[ok] save-as-quick appends / falls back / rejects duplicates")
+
+# --- end-to-end: Save as quick button flow (temp config, patched prompt) ---
+with tempfile.TemporaryDirectory() as td:
+    cfg = os.path.join(td, "commands.json")
+    with open(cfg, "w", encoding="utf-8") as f:
+        json_mod.dump({"buttons": []}, f)
+    real_cfg = bg_runner.CONFIG_FILE
+    real_qid = bg_runner.QInputDialog
+    bg_runner.CONFIG_FILE = cfg
+    bg_runner.QInputDialog = type("FakeQInputDialog", (), {
+        "getText": staticmethod(lambda *a, **k: ("My Label", True)),
+    })
+    try:
+        win.cmd_edit.setText("echo quick-save")
+        win.save_as_quick()
+        btns, _ = bg_runner.load_quick_commands(cfg)
+        assert btns == [("My Label", "echo quick-save")], btns
+        labels = [
+            win._quick_row.itemAt(i).widget().text()
+            for i in range(win._quick_row.count())
+            if win._quick_row.itemAt(i).widget() is not None
+        ]
+        assert "My Label" in labels, labels
+        win.cmd_edit.setText("")
+        win.save_as_quick()  # empty box -> status message, no crash
+    finally:
+        bg_runner.CONFIG_FILE = real_cfg
+        bg_runner.QInputDialog = real_qid
+print("[ok] save-as-quick end-to-end (prompt + config + button bar)")
+
 print("\nALL SMOKE TESTS PASSED")

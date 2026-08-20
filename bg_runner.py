@@ -4,6 +4,7 @@
 Features:
   * type a command (e.g. an SSH tunnel) and run it as a background process
   * drag & drop script files to run them
+  * save the current command as a quick-start button (commands.json)
   * live list of running/finished tasks with PID and status
   * double-click a task to see its console output (live)
   * stop / restart / copy commands from the context menu
@@ -33,6 +34,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QApplication,
     QHBoxLayout,
+    QInputDialog,
     QLineEdit,
     QListWidget,
     QListWidgetItem,
@@ -121,13 +123,14 @@ DEFAULT_QUICK_COMMANDS: list[dict] = [
 CONFIG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "commands.json")
 
 
-def load_quick_commands(path: str = CONFIG_FILE) -> tuple[list[tuple[str, str]], str | None]:
+def load_quick_commands(path: str | None = None) -> tuple[list[tuple[str, str]], str | None]:
     """Load (label, command) pairs from a JSON config file.
 
     A sample commands.json is created next to the program on first run.
     Returns (buttons, warning); warning is set when the file could not be
     read or parsed (defaults are used in that case).
     """
+    path = path or CONFIG_FILE
     defaults = [(c["label"], c["command"]) for c in DEFAULT_QUICK_COMMANDS]
     if not os.path.exists(path):
         try:
@@ -615,6 +618,11 @@ class MainWindow(QMainWindow):
         self.cmd_edit.returnPressed.connect(self.run_command)
         run_btn = QPushButton("Run")
         run_btn.clicked.connect(self.run_command)
+        save_btn = QPushButton("Save as quick")
+        save_btn.setToolTip(
+            "Save the command in the box to commands.json as a quick-start button"
+        )
+        save_btn.clicked.connect(self.save_as_quick)
         stop_btn = QPushButton("Stop selected")
         stop_btn.clicked.connect(self.stop_selected)
         clear_btn = QPushButton("Clear finished")
@@ -623,6 +631,7 @@ class MainWindow(QMainWindow):
         bar = QHBoxLayout()
         bar.addWidget(self.cmd_edit, 1)
         bar.addWidget(run_btn)
+        bar.addWidget(save_btn)
         bar.addWidget(stop_btn)
         bar.addWidget(clear_btn)
 
@@ -688,6 +697,66 @@ class MainWindow(QMainWindow):
         menu = QMenu(self)
         menu.addAction("Reload commands.json", self._build_quick_buttons)
         menu.exec(self._quick_bar.mapToGlobal(pos))
+
+    # ---- save command as quick-start button ------------------------
+
+    def save_as_quick(self) -> None:
+        """Save the command in the box to commands.json as a quick-start
+        button, then rebuild the button bar so it appears immediately."""
+        cmd = self.cmd_edit.text().strip()
+        if not cmd:
+            self.statusBar().showMessage("Command box is empty — nothing to save", 5000)
+            return
+        label, ok = QInputDialog.getText(
+            self,
+            "Save quick command",
+            "Quick-start button label (leave empty to use the command itself):",
+            text=cmd,
+        )
+        if not ok:
+            return
+        error = self._append_quick_command(label, cmd)
+        if error is not None:
+            QMessageBox.warning(self, "BG Runner", error)
+            return
+        self._build_quick_buttons()
+        self.statusBar().showMessage(f"Saved quick command: {label.strip() or cmd}", 6000)
+
+    def _append_quick_command(
+        self, label: str, command: str, path: str | None = None
+    ) -> str | None:
+        """Append (label, command) to the quick-command config file.
+
+        *path* defaults to CONFIG_FILE. Returns None on success, or an error
+        message (empty command / duplicate / read or write failure) — never
+        raises. The button bar is NOT rebuilt here; callers do that.
+        """
+        command = command.strip()
+        label = label.strip() or command
+        if not command:
+            return "Command is empty."
+        path = path or CONFIG_FILE
+        try:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+        except (OSError, ValueError) as e:
+            return f"Cannot read {path}: {e}"
+        if not isinstance(data, dict):
+            data = {}
+        buttons = data.get("buttons")
+        if not isinstance(buttons, list):
+            buttons = data["buttons"] = []
+        for b in buttons:
+            if isinstance(b, dict) and b.get("command") == command:
+                return f"'{command}' is already a quick command."
+        buttons.append({"label": label, "command": command})
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+                f.write("\n")
+        except OSError as e:
+            return f"Cannot write {path}: {e}"
+        return None
 
     # ---- task management -----------------------------------------
 
